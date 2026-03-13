@@ -1,0 +1,73 @@
+
+html, body {
+	
+	margin: 0 auto;
+	font-family: sans-serif;
+	font-size: 19px;
+    background-attachment: fixed; 
+    background-image: url("../img/back.jpg")
+}
+	
+h1 {
+	margin: 2px;
+    text-align: center;
+}
+	
+button {
+    padding: 8px;
+   }
+
+#content {
+	padding: 20px;
+	display:flex;
+    flex-wrap:wrap;
+
+}
+	
+#mainClick {
+    width: 50%;
+
+}
+#gamespace {
+	margin: 20px;
+    height: 450px;
+	background-color: #FFF;
+	border: 2px solid #CCC; 
+    box-shadow: 5px 5px 5px #777777 ;
+    float: right;
+    width: 60%; 
+    margin-left: auto;
+    margin-right: auto;
+    background: linear-gradient(171deg, rgba(214, 214, 214, 1) 0%, rgba(218, 227, 213, 1) 50%, rgba(156, 186, 156, 1) 100%);
+    cursor: url(../img/shank.png),auto;
+  
+
+}
+
+
+.col1{
+    text-align:center;
+    width: 550px;
+    min-width: 400px;
+}
+
+
+@media only screen and (max-width: 900px){
+    #content{
+        display: inline-block;
+    }
+    .col1{
+        margin:0 auto;
+    }
+}
+
+#direction {
+    text-align: center;
+    font-size: 19px;
+}
+#leftside{
+  width: 50%; 
+  margin-left: auto;
+  margin-right: auto;
+ 
+}

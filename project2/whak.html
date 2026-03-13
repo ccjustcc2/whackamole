@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>whackamole</title>
+  <style>
+    html, body { margin:0; height:100%; background:#f4f4f4; font-family:system-ui, Arial; }
+    .wrap { display:flex; flex-direction:column; align-items:center; gap:10px; padding:14px; }
+
+    /* HUD */
+    .hud { display:flex; gap:16px; align-items:center; }
+    .pill { background:#fff; border:1px solid #ccc; padding:6px 10px; border-radius:8px; }
+
+    /* Circle game area */
+    #game {
+      position:relative;
+      width:600px; height:600px;
+      border-radius:50%;
+      background:#ffffff;
+      border:2px solid #999;
+      overflow:hidden;           /* clip to circle */
+      touch-action:none;
+      user-select:none;
+    }
+
+    /* Centered castle (red square) */
+    #castle {
+      position:absolute;
+      width:40px; height:40px;
+      background:#d62828;        /* red */
+      left:50%; top:50%;
+      transform:translate(-50%,-50%);
+    }
+
+    /* Enemies are triangles via clip-path */
+    .enemy {
+      position:absolute;
+      width:28px; height:28px;
+      clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+      cursor:pointer;
+    }
+    .enemy.sword { background:#d62828; }  /* red */
+    .enemy.bow   { background:#2a9d8f; }  /* green */
+    .enemy.wiz   { background:#277da1; }  /* blue */
+
+    /* Projectiles */
+    .arrow {
+      position:absolute;
+      width:14px; height:3px;
+      background:#444;           /* neutral arrow color */
+    }
+
+    /* Wizard zigzag "beam" segments (small blue squares) */
+    .beam-seg {
+      position:absolute;
+      width:6px; height:6px;
+      background:#277da1;        /* blue to match wizard */
+    }
+
+    /* Overlay for Game Over */
+    #overlay {
+      position:absolute; inset:0;
+      display:none; place-items:center;
+      background:#00000080; color:#fff;
+      text-align:center;
+    }
+    #overlay .card {
+      background:#222; border:1px solid #444; padding:16px 20px; border-radius:10px;
+    }
+    #overlay h2 { margin:0 0 8px 0; font-size:20px; }
+    #overlay p { margin:6px 0 12px 0; }
+    button { padding:8px 12px; border:1px solid #aaa; background:#fff; border-radius:6px; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hud">
+      <div class="pill">Lives: <span id="lives">3</span></div>
+      <div class="pill">Enemies defeated: <span id="kills">0</span></div>
+    </div>
+
+    <div id="game" aria-label="Circular Game Area">
+      <div id="castle" aria-label="Castle"></div>
+
+      <div id="overlay">
+        <div class="card">
+          <h2>Game Over</h2>
+          <p>You ran out of lives.</p>
+          <button id="restart">Restart</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="pill">Click enemies to defeat them. Sword (red) runs to castle. Bow (green) shoots straight. Wizard (blue) shoots zigzag.</div>
+  </div>
+
+  <!-- jQuery -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+  <script>
+    $(function() {
+      // -----------------------------
+      // Constants / Config
+      // -----------------------------
+      const $game = $('#game');
+      const $castle = $('#castle');
+      const $lives = $('#lives');
+      const $kills = $('#kills');
+      const $overlay = $('#overlay');
+      const $restart = $('#restart');
+
+      const G_W = $game.width();
+      const G_H = $game.height();
+      const CX = G_W / 2;
+      const CY = G_H / 2;
+      const RADIUS = G_W / 2;                // game circle radius
+      const CASTLE_SIZE = 40;
+      const CASTLE = { x: CX - CASTLE_SIZE/2, y: CY - CASTLE_SIZE/2, w: CASTLE_SIZE, h: CASTLE_SIZE };
+
+      const ENEMY_SIZE = 28;
+      const MIN_SPAWN_RADIUS = 140;          // "not too close" to castle
+      const SPAWN_INTERVAL_MS = 900;         // enemy spawn interval
+      const SWORD_SPEED = 80;                // px/sec toward castle
+      const BOW_COOLDOWN = 1600;             // ms between shots
+      const WIZ_COOLDOWN = 2000;             // ms between shots
+      const ARROW_SPEED = 220;               // px/sec toward castle
+      const BEAM_SPEED = 200;                // px/sec along path to castle
+      const ZIG_STEP = 20;                    // px between zig/zag flips
+      const ZIG_AMPLITUDE = 16;               // px offset for zigzag
+
+      // -----------------------------
+      // State
+      // -----------------------------
+      let running = true;
+      let lives = 3;
+      let kills = 0;
+
+      let enemies = [];     // { $el, type, x,y, w,h, vx,vy, lastShot }
+      let arrows = [];      // { $el, x,y, vx,vy }
+      let beams = [];       // { segs:[{$el,x,y}], head:{x,y}, dir:{dx,dy}, perp:{px,py}, t, totalDist }
+
+      let lastSpawn = performance.now();
+      let lastTime = performance.now();
+
+      // -----------------------------
+      // Helpers
+      // -----------------------------
+      function rand(min, max) { return Math.random() * (max - min) + min; }
+
+      function insideCircle(x, y) {
+        const dx = x - CX, dy = y - CY;
+        return dx*dx + dy*dy <= (RADIUS - 2)*(RADIUS - 2); // small safety margin
+      }
+
+      function spawnPos() {
+        // Random angle and radius between MIN_SPAWN_RADIUS and edge; retry if outside circle margin
+        // Choose radius uniformly in [MIN_SPAWN_RADIUS, RADIUS-ENEMY_SIZE]
+        const r = rand(MIN_SPAWN_RADIUS, RADIUS - ENEMY_SIZE);
+        const theta = rand(0, Math.PI * 2);
+        const xCenter = CX + r * Math.cos(theta);
+        const yCenter = CY + r * Math.sin(theta);
+        const x = Math.round(xCenter - ENEMY_SIZE/2);
+        const y = Math.round(yCenter - ENEMY_SIZE/2);
+        return { x, y };
+      }
+
+      function norm(x, y) {
+        const m = Math.hypot(x, y) || 1;
+        return { x: x/m, y: y/m };
+      }
+
+      function aabbOverlap(a, b) {
+        return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h);
+      }
+
+      function clampToCircle(obj) {
+        // keep within the circle by clamping center distance (not strictly required for gameplay)
+        const cx = obj.x + obj.w/2, cy = obj.y + obj.h/2;
+        const dx = cx - CX, dy = cy - CY;
+        const dist = Math.hypot(dx, dy);
+        const maxDist = RADIUS - Math.max(obj.w, obj.h)/2 - 1;
+        if (dist > maxDist) {
+          const k = maxDist / dist;
+          const nx = CX + dx * k, ny = CY + dy * k;
+          obj.x = Math.round(nx - obj.w/2);
+          obj.y = Math.round(ny - obj.h/2);
+        }
+      }
+
+      // -----------------------------
+      // Spawn enemy
+      // -----------------------------
+      function spawnEnemy() {
+        // Pick type: sword / bow / wiz (roughly equal probability)
+        const r = Math.random();
+        const type = r < 1/3 ? 'sword' : (r < 2/3 ? 'bow' : 'wiz');
+
+        const pos = spawnPos();
+        const $el = $('<div class="enemy"/>').addClass(type).appendTo($game);
+        $el.css({ left: pos.x + 'px', top: pos.y + 'px' });
+
+        const e = {
+          $el,
+          type,
+          x: pos.x, y: pos.y, w: ENEMY_SIZE, h: ENEMY_SIZE,
+          vx: 0, vy: 0,
+          lastShot: performance.now()
+        };
+
+        // Click to defeat enemy
+        $el.on('click', function(ev) {
+          // remove enemy
+          e.$el.remove();
+          enemies = enemies.filter(en => en !== e);
+          kills++;
+          $kills.text(kills);
+          ev.stopPropagation();
+        });
+
+        enemies.push(e);
+      }
+
+      // -----------------------------
+      // Shooting (Bow & Wizard)
+      // -----------------------------
+      function shootArrow(from) {
+        // Arrow goes straight from enemy center to castle center
+        const sx = from.x + from.w/2;
+        const sy = from.y + from.h/2;
+        const tx = CX;
+        const ty = CY;
+        const d = norm(tx - sx, ty - sy);
+        const $el = $('<div class="arrow"/>').appendTo($game);
+        const a = { $el, x: sx - 7, y: sy - 1.5, vx: d.x * ARROW_SPEED, vy: d.y * ARROW_SPEED, w:14, h:3 };
+        $el.css({ left: a.x + 'px', top: a.y + 'px' });
+        arrows.push(a);
+      }
+
+      function shootBeam(from) {
+        // Beam as a moving zigzag made of small segments
+        const sx = from.x + from.w/2;
+        const sy = from.y + from.h/2;
+        const dx = CX - sx, dy = CY - sy;
+        const d = norm(dx, dy);
+        // perpendicular
+        const perp = norm(-d.y, d.x);
+
+        // Pre-create N segments that will trail along the zigzag
+        const SEG_COUNT = 8;
+        const segs = [];
+        for (let i = 0; i < SEG_COUNT; i++) {
+          const $seg = $('<div class="beam-seg"/>').appendTo($game);
+          segs.push({ $el: $seg, x: sx, y: sy });
+        }
+        beams.push({
+          segs,
+          head: { x: sx, y: sy },
+          dir: { dx: d.x, dy: d.y },
+          perp: { px: perp.x, py: perp.y },
+          t: 0, // distance traveled
+          totalDist: Math.hypot(dx, dy)
+        });
+      }
+
+      // -----------------------------
+      // Game Over
+      // -----------------------------
+      function loseLife() {
+        if (!running) return;
+        lives = Math.max(0, lives - 1);
+        $lives.text(lives);
+        if (lives <= 0) {
+          running = false;
+          $overlay.css('display','grid');
+        }
+      }
+
+      function resetGame() {
+        running = true;
+        lives = 3; kills = 0;
+        $lives.text(lives);
+        $kills.text(kills);
+        // Clear entities
+        enemies.forEach(e => e.$el.remove());
+        arrows.forEach(a => a.$el.remove());
+        beams.forEach(b => b.segs.forEach(s => s.$el.remove()));
+        enemies = []; arrows = []; beams = [];
+        lastSpawn = performance.now();
+        lastTime = performance.now();
+        $overlay.hide();
+        requestAnimationFrame(loop);
+      }
+
+      $restart.on('click', resetGame);
+
+      // -----------------------------
+      // Main loop
+      // -----------------------------
+      function loop(now) {
+        if (!running) return;
+
+        const dt = Math.min(50, now - lastTime) / 1000; // seconds
+        lastTime = now;
+
+        // Spawn
+        if (now - lastSpawn >= SPAWN_INTERVAL_MS) {
+          lastSpawn = now;
+          spawnEnemy();
+        }
+
+        // Update enemies
+        for (let i = enemies.length - 1; i >= 0; i--) {
+          const e = enemies[i];
+
+          if (e.type === 'sword') {
+            // Move toward castle center
+            const cx = e.x + e.w/2, cy = e.y + e.h/2;
+            const d = norm(CX - cx, CY - cy);
+            e.vx = d.x * SWORD_SPEED;
+            e.vy = d.y * SWORD_SPEED;
+            e.x += e.vx * dt;
+            e.y += e.vy * dt;
+            clampToCircle(e);
+            e.$el.css({ left: Math.round(e.x) + 'px', top: Math.round(e.y) + 'px' });
+
+            // Check collision with castle (AABB)
+            const hit = aabbOverlap({ x:e.x, y:e.y, w:e.w, h:e.h }, CASTLE);
+            if (hit) {
+              // Enemy reaches castle: lose a life and remove enemy
+              e.$el.remove();
+              enemies.splice(i, 1);
+              loseLife();
+            }
+          } else if (e.type === 'bow') {
+            // Stationary; shoot straight at cooldown
+            if (now - e.lastShot >= BOW_COOLDOWN) {
+              e.lastShot = now;
+              shootArrow(e);
+            }
+          } else if (e.type === 'wiz') {
+            // Stationary; shoot zigzag beam at cooldown
+            if (now - e.lastShot >= WIZ_COOLDOWN) {
+              e.lastShot = now;
+              shootBeam(e);
+            }
+          }
+        }
+
+        // Update arrows
+        for (let i = arrows.length - 1; i >= 0; i--) {
+          const a = arrows[i];
+          a.x += a.vx * dt;
+          a.y += a.vy * dt;
+          a.$el.css({ left: Math.round(a.x) + 'px', top: Math.round(a.y) + 'px' });
+
+          // Hit castle?
+          if (aabbOverlap({ x:a.x, y:a.y, w:14, h:3 }, CASTLE)) {
+            a.$el.remove();
+            arrows.splice(i, 1);
+            loseLife();
+            continue;
+          }
+          // Out of bounds (outside game circle)
+          const cxp = a.x + 7, cyp = a.y + 1.5;
+          if (!insideCircle(cxp, cyp)) {
+            a.$el.remove();
+            arrows.splice(i, 1);
+          }
+        }
+
+        // Update beams (zigzag)
+        for (let b = beams.length - 1; b >= 0; b--) {
+          const beam = beams[b];
+          // Advance head along dir
+          const step = BEAM_SPEED * dt;        // distance this frame
+          beam.t += step;
+
+          const prog = Math.min(beam.t, beam.totalDist);
+          // head position along line
+          const hx = (beam.head.x = beam.segs[0] ? beam.segs[0].x : beam.head.x);
+          const hy = (beam.head.y = beam.segs[0] ? beam.segs[0].y : beam.head.y);
+
+          // Compute current base position from origin plus prog along dir
+          const baseX = (beam.segs[0] ? beam.segs[0].x : 0); // will reassign path origin on first step
+          // To avoid storing origin separately, compute from first creation values tracked below:
+          // We'll keep explicit origin:
+        }
+      }
+
+      // Keep explicit origin for beams
+      // We'll redefine shootBeam to store origin and track head position properly.
+    });
+  </script>
+
+  <script>
+    // Re-define the game with corrected beam handling (kept separate for clarity).
+    $(function() {
+      const $game = $('#game');
+      const $castle = $('#castle');
+      const $lives = $('#lives');
+      const $kills = $('#kills');
+      const $overlay = $('#overlay');
+      const $restart = $('#restart');
+
+      const G_W = $game.width();
+      const G_H = $game.height();
+      const CX = G_W / 2;
+      const CY = G_H / 2;
+      const RADIUS = G_W / 2;
+      const CASTLE_SIZE = 40;
+      const CASTLE = { x: CX - CASTLE_SIZE/2, y: CY - CASTLE_SIZE/2, w: CASTLE_SIZE, h: CASTLE_SIZE };
+
+      const ENEMY_SIZE = 28;
+      const MIN_SPAWN_RADIUS = 140;
+      const SPAWN_INTERVAL_MS = 900;
+      const SWORD_SPEED = 80;
+      const BOW_COOLDOWN = 1600;
+      const WIZ_COOLDOWN = 2000;
+      const ARROW_SPEED = 220;
+      const BEAM_SPEED = 200;
+      const ZIG_STEP = 20;
+      const ZIG_AMPLITUDE = 16;
+
+      let running = true;
+      let lives = 10;
+      let kills = 0;
+
+      let enemies = [];
+      let arrows = [];
+      let beams = [];
+
+      let lastSpawn = performance.now();
+      let lastTime = performance.now();
+
+      function rand(min, max) { return Math.random() * (max - min) + min; }
+      function insideCircle(x, y) {
+        const dx = x - CX, dy = y - CY;
+        return dx*dx + dy*dy <= (RADIUS - 2)*(RADIUS - 2);
+      }
+      function spawnPos() {
+        const r = rand(MIN_SPAWN_RADIUS, RADIUS - ENEMY_SIZE);
+        const theta = rand(0, Math.PI * 2);
+        const xCenter = CX + r * Math.cos(theta);
+        const yCenter = CY + r * Math.sin(theta);
+        return { x: Math.round(xCenter - ENEMY_SIZE/2), y: Math.round(yCenter - ENEMY_SIZE/2) };
+      }
+      function norm(x, y) { const m = Math.hypot(x, y) || 1; return { x:x/m, y:y/m }; }
+      function aabbOverlap(a, b) {
+        return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h);
+      }
+      function clampToCircle(obj) {
+        const cx = obj.x + obj.w/2, cy = obj.y + obj.h/2;
+        const dx = cx - CX, dy = cy - CY;
+        const dist = Math.hypot(dx, dy);
+        const maxDist = RADIUS - Math.max(obj.w, obj.h)/2 - 1;
+        if (dist > maxDist) {
+          const k = maxDist / dist;
+          const nx = CX + dx * k, ny = CY + dy * k;
+          obj.x = Math.round(nx - obj.w/2);
+          obj.y = Math.round(ny - obj.h/2);
+        }
+      }
+
+      function spawnEnemy() {
+        const r = Math.random();
+        const type = r < 1/3 ? 'sword' : (r < 2/3 ? 'bow' : 'wiz');
+        const pos = spawnPos();
+        const $el = $('<div class="enemy"/>').addClass(type).appendTo($game);
+        $el.css({ left: pos.x + 'px', top: pos.y + 'px' });
+
+        const e = { $el, type, x: pos.x, y: pos.y, w: ENEMY_SIZE, h: ENEMY_SIZE, vx:0, vy:0, lastShot: performance.now() };
+        $el.on('click', function(ev) {
+          e.$el.remove();
+          enemies = enemies.filter(en => en !== e);
+          kills++; $kills.text(kills);
+          ev.stopPropagation();
+        });
+        enemies.push(e);
+      }
+
+      function shootArrow(from) {
+        const sx = from.x + from.w/2;
+        const sy = from.y + from.h/2;
+        const d = norm(CX - sx, CY - sy);
+        const $el = $('<div class="arrow"/>').appendTo($game);
+        const a = { $el, x: sx - 7, y: sy - 1.5, vx: d.x * ARROW_SPEED, vy: d.y * ARROW_SPEED, w:14, h:3 };
+        $el.css({ left: a.x + 'px', top: a.y + 'px' });
+        arrows.push(a);
+      }
+
+      function shootBeam(from) {
+        const ox = from.x + from.w/2;
+        const oy = from.y + from.h/2;
+        const dir = norm(CX - ox, CY - oy);
+        const perp = norm(-dir.y, dir.x);
+
+        const SEG_COUNT = 10;
+        const segs = [];
+        for (let i = 0; i < SEG_COUNT; i++) {
+          const $seg = $('<div class="beam-seg"/>').appendTo($game);
+          segs.push({ $el: $seg, x: ox, y: oy });
+        }
+        beams.push({
+          origin: { x: ox, y: oy },
+          dir, perp,
+          segs,
+          headDist: 0,                // distance traveled by head
+          totalDist: Math.hypot(CX - ox, CY - oy)
+        });
+      }
+
+      function loseLife() {
+        if (!running) return;
+        lives = Math.max(0, lives - 1);
+        $lives.text(lives);
+        if (lives <= 0) {
+          running = false;
+          $overlay.css('display','grid');
+        }
+      }
+
+      function resetGame() {
+        running = true;
+        lives = 3; kills = 0;
+        $lives.text(lives); $kills.text(kills);
+        enemies.forEach(e => e.$el.remove());
+        arrows.forEach(a => a.$el.remove());
+        beams.forEach(b => b.segs.forEach(s => s.$el.remove()));
+        enemies = []; arrows = []; beams = [];
+        lastSpawn = performance.now();
+        lastTime = performance.now();
+        $overlay.hide();
+        requestAnimationFrame(loop);
+      }
+      $restart.on('click', resetGame);
+
+      function loop(now) {
+        if (!running) return;
+        const dt = Math.min(50, now - lastTime) / 1000;
+        lastTime = now;
+
+        // Spawning
+        if (now - lastSpawn >= SPAWN_INTERVAL_MS) {
+          lastSpawn = now;
+          spawnEnemy();
+        }
+
+        // Enemies update
+        for (let i = enemies.length - 1; i >= 0; i--) {
+          const e = enemies[i];
+          if (e.type === 'sword') {
+            const cx = e.x + e.w/2, cy = e.y + e.h/2;
+            const d = norm(CX - cx, CY - cy);
+            e.vx = d.x * SWORD_SPEED;
+            e.vy = d.y * SWORD_SPEED;
+            e.x += e.vx * dt; e.y += e.vy * dt;
+            clampToCircle(e);
+            e.$el.css({ left: Math.round(e.x) + 'px', top: Math.round(e.y) + 'px' });
+
+            if (aabbOverlap({ x:e.x, y:e.y, w:e.w, h:e.h }, CASTLE)) {
+              e.$el.remove(); enemies.splice(i, 1);
+              loseLife();
+            }
+          } else if (e.type === 'bow') {
+            if (now - e.lastShot >= BOW_COOLDOWN) {
+              e.lastShot = now;
+              shootArrow(e);
+            }
+          } else if (e.type === 'wiz') {
+            if (now - e.lastShot >= WIZ_COOLDOWN) {
+              e.lastShot = now;
+              shootBeam(e);
+            }
+          }
+        }
+
+        // Arrows update
+        for (let i = arrows.length - 1; i >= 0; i--) {
+          const a = arrows[i];
+          a.x += a.vx * dt; a.y += a.vy * dt;
+          a.$el.css({ left: Math.round(a.x) + 'px', top: Math.round(a.y) + 'px' });
+
+          if (aabbOverlap({ x:a.x, y:a.y, w:14, h:3 }, CASTLE)) {
+            a.$el.remove(); arrows.splice(i, 1); loseLife(); continue;
+          }
+          const cxp = a.x + 7, cyp = a.y + 1.5;
+          if (!insideCircle(cxp, cyp)) {
+            a.$el.remove(); arrows.splice(i, 1);
+          }
+        }
+
+        // Beams update (zigzag path head; trail segments follow)
+        for (let b = beams.length - 1; b >= 0; b--) {
+          const beam = beams[b];
+          beam.headDist += BEAM_SPEED * dt;
+          const headDist = Math.min(beam.headDist, beam.totalDist);
+
+          // Zigzag offset: alternate every ZIG_STEP pixels
+          const flip = Math.floor(headDist / ZIG_STEP) % 2 === 0 ? 1 : -1;
+          const offset = flip * ZIG_AMPLITUDE;
+
+          const hx = beam.origin.x + beam.dir.x * headDist + beam.perp.x * offset;
+          const hy = beam.origin.y + beam.dir.y * headDist + beam.perp.y * offset;
+
+          // Position segments spaced behind the head
+          const SEG_SPACING = 10; // px behind head along path
+          for (let s = 0; s < beam.segs.length; s++) {
+            const dist = Math.max(0, headDist - s * SEG_SPACING);
+            const flipS = Math.floor(dist / ZIG_STEP) % 2 === 0 ? 1 : -1;
+            const offS = flipS * ZIG_AMPLITUDE;
+            const x = beam.origin.x + beam.dir.x * dist + beam.perp.x * offS;
+            const y = beam.origin.y + beam.dir.y * dist + beam.perp.y * offS;
+            beam.segs[s].x = x; beam.segs[s].y = y;
+            beam.segs[s].$el.css({ left: Math.round(x - 3) + 'px', top: Math.round(y - 3) + 'px' });
+          }
+
+          // Hit castle? Use head point vs castle AABB
+          if (aabbOverlap({ x: hx-2, y: hy-2, w:4, h:4 }, CASTLE)) {
+            // Remove entire beam
+            beam.segs.forEach(s => s.$el.remove());
+            beams.splice(b, 1);
+            loseLife();
+            continue;
+          }
+
+          // Beam finished (head reached or slightly past line end or left circle)
+          const outOfCircle = !insideCircle(hx, hy);
+          if (headDist >= beam.totalDist + 8 || outOfCircle) {
+            beam.segs.forEach(s => s.$el.remove());
+            beams.splice(b, 1);
+          }
+        }
+
+        requestAnimationFrame(loop);
+      }
+
+      // Start immediately
+      requestAnimationFrame(loop);
+    });
+  </script>
+</body>
+</html>
