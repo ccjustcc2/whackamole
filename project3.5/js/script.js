@@ -41,6 +41,32 @@ window.addEventListener("load", () => {
         name
             ? `${name}, this is whack-a-mole with RPG elements. Hit enemies for EXP and skills!`
             : `This is whack-a-mole with RPG elements. Hit enemies for EXP and skills!`;
+
+
+        $("#gamespace").html(`
+        <div id="circleGame" style="
+            position:relative;
+            width:600px;
+            height:600px;
+            border-radius:50%;
+            background: linear-gradient(171deg, rgba(214, 214, 214, 1) 0%, rgba(218, 227, 213, 1) 50%, rgba(156, 186, 156, 1) 100%);
+            cursor: url(../img/shank.png),auto;
+            margin:0 auto;
+            overflow:hidden;
+        ">
+            <div id="castle" style="
+                position:absolute;
+                width:40px;
+                height:40px;
+                background:#d62828;
+                left:50%; 
+                top:50%;
+                transform:translate(-50%, -50%);
+            "></div>
+        </div>
+    `);
+    
+
 });
     $("#start_button").click(function(){
         alert("Game Started!");
@@ -74,29 +100,7 @@ let CX, CY, RADIUS, CASTLE;
 // Start game when clicking Game A start button
 $("#start_button").on("click", function () {
     $("#start_button").off(); 
-
-    $("#gamespace").html(`
-        <div id="circleGame" style="
-            position:relative;
-            width:600px;
-            height:600px;
-            border-radius:50%;
-            background: linear-gradient(171deg, rgba(214, 214, 214, 1) 0%, rgba(218, 227, 213, 1) 50%, rgba(156, 186, 156, 1) 100%);
-            cursor: url(../img/shank.png),auto;
-            margin:0 auto;
-            overflow:hidden;
-        ">
-            <div id="castle" style="
-                position:absolute;
-                width:40px;
-                height:40px;
-                background:#d62828;
-                left:50%; 
-                top:50%;
-                transform:translate(-50%, -50%);
-            "></div>
-        </div>
-    `);
+    
 
     setupGameB();
 });

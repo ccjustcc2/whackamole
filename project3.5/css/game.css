@@ -1,4 +1,5 @@
 
+
 html, body {
 	
 	margin: 0 auto;
@@ -22,10 +23,11 @@ button {
    }
 
 #content {
-	padding: 20px;
 	display:flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px;
     flex-wrap:wrap;
-
 }
 #circleGame .enemy.sword {
     background:#d62828;
@@ -53,16 +55,6 @@ button {
 
 }
 #gamespace {
-	margin: 20px;
-    height: 450px;
-	background-color: #FFF;
-	border: 2px solid #CCC; 
-    box-shadow: 5px 5px 5px #777777 ;
-    float: right;
-    width: 60%; 
-    margin-left: auto;
-    margin-right: auto;
-    background: linear-gradient(171deg, rgba(214, 214, 214, 1) 0%, rgba(218, 227, 213, 1) 50%, rgba(156, 186, 156, 1) 100%);
     cursor: url(../img/shank.png),auto;
   
 
