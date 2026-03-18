@@ -5,7 +5,7 @@ function increaseScore() {
     $("#score").html(score + " pts");
 }
 
-// Slash effect
+// Click visual effect
 $(document).on("click", function(e) {
     const $slash = $("<div class='slash'></div>");
     $slash.css({
@@ -17,7 +17,7 @@ $(document).on("click", function(e) {
     setTimeout(() => $slash.remove(), 300);
 });
 
-// Game variables
+// Core game state
 let running = false;
 let enemies = [];
 let arrows = [];
@@ -30,9 +30,7 @@ let lastTime = 0;
 
 let CX, CY, RADIUS, CASTLE;
 
-// --------------------------------------
-// PAGE LOAD
-// --------------------------------------
+// Page initialization
 window.addEventListener("load", () => {
     let name = prompt("What's your name Adventurer?");
     const directionsEl = document.getElementById("directions");
@@ -84,9 +82,7 @@ window.addEventListener("load", () => {
     });
 });
 
-// --------------------------------------
-// SETUP
-// --------------------------------------
+// Game setup
 function setupGame() {
     const $arena = $("#circleGame");
 
@@ -117,14 +113,13 @@ function setupGame() {
     requestAnimationFrame(loop);
 }
 
-// --------------------------------------
-// HELPERS
-// --------------------------------------
+// Normalize vector
 function norm(x, y) {
     const m = Math.hypot(x, y) || 1;
     return { x: x / m, y: y / m };
 }
 
+// AABB collision
 function aabbOverlap(a, b) {
     return !(
         a.x + a.w < b.x ||
@@ -134,10 +129,10 @@ function aabbOverlap(a, b) {
     );
 }
 
+// Spawn position
 function spawnPos(type) {
     let angle = Math.random() * Math.PI * 2;
 
-    // ranged enemies spawn farther out
     let r = (type === "bow" || type === "wiz")
         ? RADIUS - 60
         : 170 + Math.random() * (RADIUS - 40 - 170);
@@ -148,9 +143,7 @@ function spawnPos(type) {
     return { x, y };
 }
 
-// --------------------------------------
-// PROJECTILES
-// --------------------------------------
+// Arrow projectile
 function shootArrow(enemy) {
     const cx = enemy.x + enemy.w / 2;
     const cy = enemy.y + enemy.h / 2;
@@ -179,38 +172,26 @@ function shootArrow(enemy) {
     });
 }
 
+// Beam projectile
 function shootBeam(enemy) {
     const cx = enemy.x + enemy.w / 2;
     const cy = enemy.y + enemy.h / 2;
 
     const dir = norm(CX - cx, CY - cy);
-
-    const $el = $("<div class='beam'></div>").css({
-        position: "absolute",
-        width: "6px",
-        height: "6px",
-        background: "cyan",
-        boxShadow: "0 0 10px cyan",
-        left: cx,
-        top: cy
-    });
-
-    $("#circleGame").append($el);
+    const perp = { x: -dir.y, y: dir.x };
 
     beams.push({
-        $el,
-        x: cx,
-        y: cy,
-        w: 6,
-        h: 6,
-        dx: dir.x * 300,
-        dy: dir.y * 300
+        origin: { x: cx, y: cy },
+        dir,
+        perp,
+        segs: [],
+        headDist: 0,
+        totalDist: 0,
+        dead: false
     });
 }
 
-// --------------------------------------
-// SPAWN ENEMY
-// --------------------------------------
+// Spawn enemy
 function spawnEnemy() {
     const types = ["sword", "bow", "wiz"];
     const type = types[Math.floor(Math.random() * 3)];
@@ -236,7 +217,7 @@ function spawnEnemy() {
         w: 28,
         h: 28,
         lastShot: performance.now(),
-        stationary: (type === "bow" || type === "wiz") // 🔒 LOCK
+        stationary: (type === "bow" || type === "wiz")
     };
 
     $el.on("click", (ev) => {
@@ -250,9 +231,7 @@ function spawnEnemy() {
     enemies.push(enemy);
 }
 
-// --------------------------------------
-// MAIN LOOP
-// --------------------------------------
+// Main loop
 function loop(now) {
     if (!running) return;
 
@@ -275,11 +254,9 @@ function loop(now) {
         const cy = e.y + e.h / 2;
         const dir = norm(CX - cx, CY - cy);
 
-        // ⚔️ ONLY swords move
         if (!e.stationary) {
             e.x += dir.x * 60 * dt;
             e.y += dir.y * 60 * dt;
-
             e.$el.css({ left: e.x, top: e.y });
 
             if (aabbOverlap(e, CASTLE)) {
@@ -289,59 +266,95 @@ function loop(now) {
             }
         }
 
-        // 🏹 Bow shoots only
-        if (e.type === "bow") {
-            if (now - e.lastShot > 4000) {
-                e.lastShot = now;
-                shootArrow(e);
-            }
+        if (e.type === "bow" && now - e.lastShot > 4000) {
+            e.lastShot = now;
+            shootArrow(e);
         }
 
-        // ⚡ Wizard shoots only
-        if (e.type === "wiz") {
-            if (now - e.lastShot > 5000) {
-                e.lastShot = now;
-                shootBeam(e);
-            }
+        if (e.type === "wiz" && now - e.lastShot > 2000) {
+            e.lastShot = now;
+            shootBeam(e);
         }
     });
 
-    // ARROWS
-    arrows.forEach(a => {
+    // Update arrows
+    arrows = arrows.filter(a => {
         a.x += a.dx * dt;
         a.y += a.dy * dt;
         a.$el.css({ left: a.x, top: a.y });
 
         if (aabbOverlap(a, CASTLE)) {
             a.$el.remove();
-            arrows = arrows.filter(ar => ar !== a);
             lives--;
-            return;
+            return false;
         }
 
         if (a.x < 0 || a.x > 600 || a.y < 0 || a.y > 600) {
             a.$el.remove();
-            arrows = arrows.filter(ar => ar !== a);
+            return false;
         }
+
+        return true;
     });
 
-    // BEAMS
-    beams.forEach(b => {
-        b.x += b.dx * dt;
-        b.y += b.dy * dt;
-        b.$el.css({ left: b.x, top: b.y });
+    // Update beams
+    beams = beams.filter(b => {
+        const SPEED = 200;
+        const SEG_LEN = 12;
+        const ZIG_STEP = 20;
+        const ZIG_AMPLITUDE = 16;
 
-        if (aabbOverlap(b, CASTLE)) {
-            b.$el.remove();
-            beams = beams.filter(be => be !== b);
-            lives--;
-            return;
+        // Remove beam completely if marked dead
+        if (b.dead) {
+            b.segs.forEach(seg => seg.$el.remove());
+            return false;
         }
 
-        if (b.x < 0 || b.x > 600 || b.y < 0 || b.y > 600) {
-            b.$el.remove();
-            beams = beams.filter(be => be !== b);
+        b.headDist += SPEED * dt;
+
+        while (b.totalDist < b.headDist) {
+            b.totalDist += SEG_LEN;
+
+            const t = b.totalDist;
+            const zigIndex = Math.floor(t / ZIG_STEP);
+            const offset = (zigIndex % 2 === 0 ? 1 : -1) * ZIG_AMPLITUDE;
+
+            const x = b.origin.x + b.dir.x * t + b.perp.x * offset;
+            const y = b.origin.y + b.dir.y * t + b.perp.y * offset;
+
+            const $seg = $("<div class='beam'></div>").css({
+                position: "absolute",
+                width: "6px",
+                height: "6px",
+                background: "cyan",
+                boxShadow: "0 0 10px cyan",
+                left: x,
+                top: y
+            });
+
+            $("#circleGame").append($seg);
+
+            const segObj = { $el: $seg, x, y, w: 6, h: 6 };
+            b.segs.push(segObj);
+
+            // Stop beam immediately on castle hit
+            if (aabbOverlap(segObj, CASTLE)) {
+                lives--;
+                b.dead = true;
+                break;
+            }
         }
+
+        // Clean up off-screen segments
+        b.segs = b.segs.filter(seg => {
+            if (seg.x < 0 || seg.x > 600 || seg.y < 0 || seg.y > 600) {
+                seg.$el.remove();
+                return false;
+            }
+            return true;
+        });
+
+        return true;
     });
 
     requestAnimationFrame(loop);
