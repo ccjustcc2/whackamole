@@ -5,6 +5,11 @@ function increaseScore() {
     $("#score").html(score + " pts");
 }
 
+// Lives UI
+function updateLivesUI() {
+    $("#livesDisplay").text("Lives: " + lives);
+}
+
 // Click visual effect
 $(document).on("click", function(e) {
     const $slash = $("<div class='slash'></div>");
@@ -41,6 +46,13 @@ window.addEventListener("load", () => {
                 ? `${name}, this is whack-a-mole with RPG elements. Hit enemies for EXP and skills!`
                 : `This is whack-a-mole with RPG elements. Hit enemies for EXP and skills!`;
     }
+
+    // Ensure a lives display inside #leftside without removing existing content
+    if (!$("#livesDisplay").length) {
+        $("#leftside").append(`<div id="livesDisplay">Lives: 5</div>`);
+    }
+
+    updateLivesUI();
 
     $("#gamespace").html(`
         <div id="circleGame" style="
@@ -105,6 +117,8 @@ function setupGame() {
     enemies = [];
     arrows = [];
     beams = [];
+
+    updateLivesUI();
 
     running = true;
     lastSpawn = performance.now();
@@ -240,7 +254,57 @@ function loop(now) {
 
     if (lives <= 0) {
         running = false;
-        alert("Game Over! Kills: " + kills);
+
+        const $gameOver = $(`
+            <div id="gameOverScreen" style="
+                position:absolute;
+                top:0;
+                left:0;
+                width:100%;
+                height:100%;
+                background:rgba(0,0,0,0.7);
+                display:flex;
+                flex-direction:column;
+                justify-content:center;
+                align-items:center;
+                color:white;
+                font-size:24px;
+                z-index:10;
+            ">
+                <div>Game Over! Kills: ${kills}</div>
+                <button id="playAgainBtn" style="
+                    margin-top:20px;
+                    padding:10px 20px;
+                    font-size:18px;
+                    background:#4dd14d;
+                    border:none;
+                    border-radius:8px;
+                    cursor:pointer;
+                ">
+                    Play Again
+                </button>
+            </div>
+        `);
+
+        $("#circleGame").append($gameOver);
+
+        $("#playAgainBtn").on("click", function () {
+            $("#gameOverScreen").remove();
+            $("#circleGame").empty().append(`
+                <div id="castle" style="
+                    position:absolute;
+                    width:40px;
+                    height:40px;
+                    background:#d62828;
+                    left:50%; 
+                    top:50%;
+                    transform:translate(-50%, -50%);
+                "></div>
+            `);
+
+            setupGame();
+        });
+
         return;
     }
 
@@ -263,6 +327,7 @@ function loop(now) {
                 e.$el.remove();
                 enemies = enemies.filter(en => en !== e);
                 lives--;
+                updateLivesUI();
             }
         }
 
@@ -286,6 +351,7 @@ function loop(now) {
         if (aabbOverlap(a, CASTLE)) {
             a.$el.remove();
             lives--;
+            updateLivesUI();
             return false;
         }
 
@@ -304,7 +370,6 @@ function loop(now) {
         const ZIG_STEP = 20;
         const ZIG_AMPLITUDE = 16;
 
-        // Remove beam completely if marked dead
         if (b.dead) {
             b.segs.forEach(seg => seg.$el.remove());
             return false;
@@ -337,15 +402,14 @@ function loop(now) {
             const segObj = { $el: $seg, x, y, w: 6, h: 6 };
             b.segs.push(segObj);
 
-            // Stop beam immediately on castle hit
             if (aabbOverlap(segObj, CASTLE)) {
                 lives--;
+                updateLivesUI();
                 b.dead = true;
                 break;
             }
         }
 
-        // Clean up off-screen segments
         b.segs = b.segs.filter(seg => {
             if (seg.x < 0 || seg.x > 600 || seg.y < 0 || seg.y > 600) {
                 seg.$el.remove();
