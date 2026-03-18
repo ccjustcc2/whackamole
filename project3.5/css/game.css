@@ -6,7 +6,10 @@ html, body {
 	font-family: sans-serif;
 	font-size: 19px;
     background-attachment: fixed; 
-    background-image: url("../img/back.jpg")
+    background-image: url("../img/back.gif");
+    background-repeat: no-repeat;
+    background-size:cover ;
+    
 }
 
 h1 {

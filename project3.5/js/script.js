@@ -10,18 +10,6 @@ function updateLivesUI() {
     $("#livesDisplay").text("Lives: " + lives);
 }
 
-// Click visual effect
-$(document).on("click", function(e) {
-    const $slash = $("<div class='slash'></div>");
-    $slash.css({
-        left: e.pageX - 75 + "px",
-        top: e.pageY - 75 + "px",
-        backgroundImage: "url('../img/slash.gif')"
-    });
-    $("body").append($slash);
-    setTimeout(() => $slash.remove(), 300);
-});
-
 // Core game state
 let running = false;
 let enemies = [];
@@ -47,7 +35,6 @@ window.addEventListener("load", () => {
                 : `This is whack-a-mole with RPG elements. Hit enemies for EXP and skills!`;
     }
 
-    // Ensure a lives display inside #leftside without removing existing content
     if (!$("#livesDisplay").length) {
         $("#leftside").append(`<div id="livesDisplay">Lives: 5</div>`);
     }
