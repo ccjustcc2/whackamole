@@ -5,25 +5,83 @@ function increaseScore() {
     $("#score").html(score + " pts");
 }
 
-// Lives UI
 function updateLivesUI() {
     $("#livesDisplay").text("Lives: " + lives);
 }
 
-// Core game state
+function updateTimerUI() {
+    $(".timer-display").text(timeLeft.toFixed(0) + " seconds left");
+}
+
 let running = false;
 let enemies = [];
 let arrows = [];
 let beams = [];
 let lives = 5;
 let kills = 0;
-
+let timeLeft = 30;
 let lastSpawn = 0;
 let lastTime = 0;
 
 let CX, CY, RADIUS, CASTLE;
 
-// Page initialization
+// Unified Game Over Function
+function gameOver(message) {
+    if (!running) return;
+    running = false;
+
+    const $gameOver = $(`
+        <div id="gameOverScreen" style="
+            position:absolute;
+            top:0;
+            left:0;
+            width:100%;
+            height:100%;
+            background:rgba(0,0,0,0.7);
+            display:flex;
+            flex-direction:column;
+            justify-content:center;
+            align-items:center;
+            color:white;
+            font-size:24px;
+            z-index:10;
+        ">
+            <div>${message}</div>
+            <button id="playAgainBtn" style="
+                margin-top:20px;
+                padding:10px 20px;
+                font-size:18px;
+                background:#4dd14d;
+                border:none;
+                border-radius:8px;
+                cursor:pointer;
+            ">
+                Play Again
+            </button>
+        </div>
+    `);
+
+    $("#circleGame").append($gameOver);
+
+    $("#playAgainBtn").on("click", function () {
+        $("#gameOverScreen").remove();
+        $("#circleGame").empty().append(`
+            <div id="castle" style="
+                position:absolute;
+                width:100px;
+                height:100px;
+                left:50%; 
+                top:50%;
+                transform:translate(-50%, -50%);
+                background-image: url('./img/castle.webp');
+                background-size: cover;
+            "></div>
+        `);
+
+        setupGame();
+    });
+}
+
 window.addEventListener("load", () => {
     let name = prompt("What's your name Adventurer?");
     const directionsEl = document.getElementById("directions");
@@ -52,15 +110,16 @@ window.addEventListener("load", () => {
             margin:0 auto;
             overflow:hidden;
         ">
-            <div id="castle" style="
-                position:absolute;
-                width:40px;
-                height:40px;
-                background:#d62828;
-                left:50%; 
-                top:50%;
-                transform:translate(-50%, -50%);
-            "></div>
+        <div id="castle" style="
+            position:absolute;
+            width:100px;
+            height:100px;
+            left:50%; 
+            top:50%;
+            transform:translate(-50%, -50%);
+            background-image: url('./img/castle.webp');
+            background-size: cover;
+        "></div>
         </div>
     `);
 
@@ -81,9 +140,10 @@ window.addEventListener("load", () => {
     });
 });
 
-// Game setup
 function setupGame() {
     const $arena = $("#circleGame");
+    timeLeft = 30;
+    updateTimerUI();
 
     const W = $arena.width();
     const H = $arena.height();
@@ -93,10 +153,10 @@ function setupGame() {
     RADIUS = W / 2;
 
     CASTLE = {
-        x: CX - 20,
-        y: CY - 20,
-        w: 40,
-        h: 40
+        x: CX - 50,
+        y: CY - 50,
+        w: 100,
+        h: 100
     };
 
     lives = 5;
@@ -114,13 +174,11 @@ function setupGame() {
     requestAnimationFrame(loop);
 }
 
-// Normalize vector
 function norm(x, y) {
     const m = Math.hypot(x, y) || 1;
     return { x: x / m, y: y / m };
 }
 
-// AABB collision
 function aabbOverlap(a, b) {
     return !(
         a.x + a.w < b.x ||
@@ -130,7 +188,6 @@ function aabbOverlap(a, b) {
     );
 }
 
-// Spawn position
 function spawnPos(type) {
     let angle = Math.random() * Math.PI * 2;
 
@@ -144,7 +201,6 @@ function spawnPos(type) {
     return { x, y };
 }
 
-// Arrow projectile
 function shootArrow(enemy) {
     const cx = enemy.x + enemy.w / 2;
     const cy = enemy.y + enemy.h / 2;
@@ -173,7 +229,6 @@ function shootArrow(enemy) {
     });
 }
 
-// Beam projectile
 function shootBeam(enemy) {
     const cx = enemy.x + enemy.w / 2;
     const cy = enemy.y + enemy.h / 2;
@@ -192,18 +247,24 @@ function shootBeam(enemy) {
     });
 }
 
-// Spawn enemy
 function spawnEnemy() {
     const types = ["sword", "bow", "wiz"];
     const type = types[Math.floor(Math.random() * 3)];
 
     const pos = spawnPos(type);
 
+    const enemyImages = {
+        sword: "./img/sword.jpg",
+        bow: "./img/archer.jpg",
+        wiz: "./img/wizard.png"
+    };
+
     const $el = $(`<div class="enemy ${type}"></div>`).css({
         position: "absolute",
-        width: "28px",
-        height: "28px",
-        clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
+        width: "48px",
+        height: "48px",
+        backgroundImage: `url(${enemyImages[type]})`,
+        backgroundSize: "cover",
         left: pos.x,
         top: pos.y
     });
@@ -226,75 +287,34 @@ function spawnEnemy() {
         enemies = enemies.filter(e => e !== enemy);
         kills++;
         increaseScore();
+
+        timeLeft += 1;
+        updateTimerUI();
+
         ev.stopPropagation();
     });
 
     enemies.push(enemy);
 }
 
-// Main loop
 function loop(now) {
     if (!running) return;
 
     let dt = Math.min(50, now - lastTime) / 1000;
     lastTime = now;
 
-    if (lives <= 0) {
-        running = false;
-
-        const $gameOver = $(`
-            <div id="gameOverScreen" style="
-                position:absolute;
-                top:0;
-                left:0;
-                width:100%;
-                height:100%;
-                background:rgba(0,0,0,0.7);
-                display:flex;
-                flex-direction:column;
-                justify-content:center;
-                align-items:center;
-                color:white;
-                font-size:24px;
-                z-index:10;
-            ">
-                <div>Game Over! Kills: ${kills}</div>
-                <button id="playAgainBtn" style="
-                    margin-top:20px;
-                    padding:10px 20px;
-                    font-size:18px;
-                    background:#4dd14d;
-                    border:none;
-                    border-radius:8px;
-                    cursor:pointer;
-                ">
-                    Play Again
-                </button>
-            </div>
-        `);
-
-        $("#circleGame").append($gameOver);
-
-        $("#playAgainBtn").on("click", function () {
-            $("#gameOverScreen").remove();
-            $("#circleGame").empty().append(`
-                <div id="castle" style="
-                    position:absolute;
-                    width:40px;
-                    height:40px;
-                    background:#d62828;
-                    left:50%; 
-                    top:50%;
-                    transform:translate(-50%, -50%);
-                "></div>
-            `);
-
-            setupGame();
-        });
-
+    // TIMER LOSS
+    timeLeft -= dt;
+    if (timeLeft <= 0) {
+        timeLeft = 0;
+        updateTimerUI();
+        gameOver(`Time ran out! Kills: ${kills}`);
         return;
     }
 
+    updateTimerUI();
+
+    // ENEMY SPAWN
     if (now - lastSpawn > 900) {
         spawnEnemy();
         lastSpawn = now;
@@ -315,6 +335,11 @@ function loop(now) {
                 enemies = enemies.filter(en => en !== e);
                 lives--;
                 updateLivesUI();
+
+                if (lives <= 0) {
+                    gameOver(`Game Over! You lost all your lives. Kills: ${kills}`);
+                    return;
+                }
             }
         }
 
@@ -329,7 +354,6 @@ function loop(now) {
         }
     });
 
-    // Update arrows
     arrows = arrows.filter(a => {
         a.x += a.dx * dt;
         a.y += a.dy * dt;
@@ -339,6 +363,11 @@ function loop(now) {
             a.$el.remove();
             lives--;
             updateLivesUI();
+
+            if (lives <= 0) {
+                gameOver(`Game Over! You lost all your lives. Kills: ${kills}`);
+            }
+
             return false;
         }
 
@@ -350,7 +379,6 @@ function loop(now) {
         return true;
     });
 
-    // Update beams
     beams = beams.filter(b => {
         const SPEED = 200;
         const SEG_LEN = 12;
@@ -392,6 +420,11 @@ function loop(now) {
             if (aabbOverlap(segObj, CASTLE)) {
                 lives--;
                 updateLivesUI();
+
+                if (lives <= 0) {
+                    gameOver(`Game Over! You lost all your lives. Kills: ${kills}`);
+                }
+
                 b.dead = true;
                 break;
             }
